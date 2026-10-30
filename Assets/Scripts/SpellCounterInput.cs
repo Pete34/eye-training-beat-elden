@@ -1,0 +1,179 @@
+using Unity.XR.CoreUtils;
+using UnityEngine;using UnityEngine.InputSystem;
+
+using UnityEngine.XR;using XRCommonUsages = UnityEngine.XR.CommonUsages;
+
+
+public sealed class SpellCounterInput : MonoBehaviour
+{
+    [SerializeField] private SpellVolleySpawner volleySpawner;
+    [SerializeField] private SpellCounterJudge counterJudge;
+    [SerializeField, Min(0.1f)] private float slashSpeedThreshold = 1.2f;
+    [SerializeField, Min(0.1f)] private float swordLengthMeters = 0.8f;
+    [SerializeField, Min(0.001f)] private float swordCollisionRadiusMeters = 0.07f;
+    [SerializeField, Min(0.01f)] private float shieldProjectionMeters = 0.45f;
+    [SerializeField, Min(0.01f)] private float shieldWidthMeters = 0.35f;
+    [SerializeField, Min(0.01f)] private float shieldHeightMeters = 0.4f;
+    [SerializeField, Min(0f)] private float shieldPaddingMeters = 0.08f;
+    [SerializeField] private bool enableEditorKeyboardTesting = true;
+
+    private XROrigin xrOrigin;
+    private Vector3 previousLeftPosition;
+    private Vector3 previousRightPosition;
+    private Quaternion previousLeftRotation = Quaternion.identity;
+    private Quaternion previousRightRotation = Quaternion.identity;
+    private bool hasLeftPose;
+    private bool hasRightPose;    private bool leftTriggerWasPressed;
+    private bool rightTriggerWasPressed;
+
+
+    private void Awake()
+    {
+        xrOrigin = FindAnyObjectByType<XROrigin>();
+        if (volleySpawner == null)
+            volleySpawner = FindAnyObjectByType<SpellVolleySpawner>();
+        if (counterJudge == null)
+            counterJudge = FindAnyObjectByType<SpellCounterJudge>();
+    }
+
+private void Update()
+    {
+        ProcessHand(XRNode.LeftHand, ref previousLeftPosition, ref previousLeftRotation, ref hasLeftPose, ref leftTriggerWasPressed);
+        ProcessHand(XRNode.RightHand, ref previousRightPosition, ref previousRightRotation, ref hasRightPose, ref rightTriggerWasPressed);
+
+        var keyboard = Keyboard.current;
+        if (!enableEditorKeyboardTesting || counterJudge == null || keyboard == null)
+            return;
+
+        if (keyboard.fKey.wasPressedThisFrame)
+            DebugCounter(SpellCounterAction.Slash);
+        if (keyboard.jKey.wasPressedThisFrame)
+            DebugCounter(SpellCounterAction.PalmBlock);
+        if (keyboard.spaceKey.wasPressedThisFrame && volleySpawner != null)
+            volleySpawner.SpawnVolley();
+    }
+
+private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quaternion previousRotation, ref bool hasPose, ref bool triggerWasPressed)
+    {
+        var device = InputDevices.GetDeviceAtXRNode(handNode);
+        if (!device.isValid || !device.TryGetFeatureValue(XRCommonUsages.devicePosition, out var localPosition))
+            return;
+
+        device.TryGetFeatureValue(XRCommonUsages.deviceRotation, out var localRotation);
+        device.TryGetFeatureValue(XRCommonUsages.deviceVelocity, out var localVelocity);
+        device.TryGetFeatureValue(XRCommonUsages.triggerButton, out var triggerPressed);
+
+        var handPosition = xrOrigin != null ? xrOrigin.transform.TransformPoint(localPosition) : localPosition;
+        var handRotation = xrOrigin != null ? xrOrigin.transform.rotation * localRotation : localRotation;
+        var handVelocity = xrOrigin != null ? xrOrigin.transform.TransformDirection(localVelocity) : localVelocity;
+        var triggerStarted = triggerPressed && !triggerWasPressed;
+
+        if (triggerStarted)
+        {
+            var action = handVelocity.magnitude >= slashSpeedThreshold
+                ? SpellCounterAction.Slash
+                : SpellCounterAction.PalmBlock;
+            var contact = action == SpellCounterAction.Slash
+                ? FindSlashContact(handPosition, handRotation, previousPosition, previousRotation, hasPose)
+                : FindShieldContact(handPosition, handRotation);
+
+            if (contact != null && counterJudge != null)
+                counterJudge.EvaluateContact(contact, action);
+        }
+
+        previousPosition = handPosition;
+        previousRotation = handRotation;
+        hasPose = true;
+        triggerWasPressed = triggerPressed;
+    }
+
+    private SpellProjectile FindSlashContact(Vector3 handPosition, Quaternion handRotation, Vector3 previousPosition, Quaternion previousRotation, bool hasPose)
+    {
+        var best = (SpellProjectile)null;
+        var nearestDepth = float.PositiveInfinity;
+        var effectiveSwordLength = swordLengthMeters * 1.1f;
+        var currentTip = handPosition + handRotation * Vector3.forward * effectiveSwordLength;
+        var previousTip = hasPose
+            ? previousPosition + previousRotation * Vector3.forward * effectiveSwordLength
+            : currentTip;
+
+        for (var index = 0; index < volleySpawner.ActiveProjectiles.Count; index++)
+        {
+            var projectile = volleySpawner.ActiveProjectiles[index];
+            if (projectile == null || projectile.IsResolved)
+                continue;
+
+            var spellPosition = projectile.transform.position;
+            var spellRadius = projectile.transform.lossyScale.x * 0.5f;
+            var distance = Mathf.Min(
+                DistanceToSegment(spellPosition, previousTip, currentTip),
+                DistanceToSegment(spellPosition, handPosition, currentTip));
+            if (hasPose)
+                distance = Mathf.Min(distance, DistanceToSegment(spellPosition, previousPosition, previousTip));
+
+            if (distance <= swordCollisionRadiusMeters + spellRadius && projectile.DepthMeters < nearestDepth)
+            {
+                best = projectile;
+                nearestDepth = projectile.DepthMeters;
+            }
+        }
+
+        return best;
+    }
+
+    private SpellProjectile FindShieldContact(Vector3 handPosition, Quaternion handRotation)
+    {
+        var best = (SpellProjectile)null;
+        var nearestDepth = float.PositiveInfinity;
+        var padding = shieldPaddingMeters;
+
+        for (var index = 0; index < volleySpawner.ActiveProjectiles.Count; index++)
+        {
+            var projectile = volleySpawner.ActiveProjectiles[index];
+            if (projectile == null || projectile.IsResolved)
+                continue;
+
+            var localPosition = Quaternion.Inverse(handRotation) * (projectile.transform.position - handPosition);
+            var radius = projectile.transform.lossyScale.x * 0.5f;
+            var intersectsShield = localPosition.z >= -padding - radius
+                && localPosition.z <= shieldProjectionMeters + padding + radius
+                && Mathf.Abs(localPosition.x) <= shieldWidthMeters * 0.5f + padding + radius
+                && Mathf.Abs(localPosition.y) <= shieldHeightMeters * 0.5f + padding + radius;
+
+            if (intersectsShield && projectile.DepthMeters < nearestDepth)
+            {
+                best = projectile;
+                nearestDepth = projectile.DepthMeters;
+            }
+        }
+
+        return best;
+    }
+
+#if UNITY_EDITOR
+
+#endif
+
+private void DebugCounter(SpellCounterAction action)
+    {
+        var desktopTools = FindAnyObjectByType<DesktopPlayerControls>();
+        if (desktopTools == null)
+            return;
+
+        if (action == SpellCounterAction.Slash)
+            desktopTools.TriggerSlashAnimation();
+        else
+            desktopTools.TriggerBlockAnimation();
+    }
+
+    private static float DistanceToSegment(Vector3 point, Vector3 start, Vector3 end)
+    {
+        var segment = end - start;
+        var lengthSquared = segment.sqrMagnitude;
+        if (lengthSquared <= Mathf.Epsilon)
+            return Vector3.Distance(point, start);
+
+        var amount = Mathf.Clamp01(Vector3.Dot(point - start, segment) / lengthSquared);
+        return Vector3.Distance(point, start + segment * amount);
+    }
+}

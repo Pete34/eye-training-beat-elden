@@ -1,0 +1,46 @@
+# Unity-generated data and local editor state
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Cc]aptures/
+.plastic/
+
+# IDE and generated project files
+.vs/
+.vscode/
+.idea/
+.gradle/
+*.csproj
+*.unityproj
+*.sln
+*.slnx
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Build outputs and packages
+ExportedObj/
+*.apk
+*.aab
+*.app
+*.unitypackage
+
+# Operating system files
+.DS_Store*
+Thumbs.db
+Desktop.ini
