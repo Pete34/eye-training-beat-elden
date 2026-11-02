@@ -92,7 +92,7 @@ public sealed class SpellCounterJudge : MonoBehaviour
 
         if (action != expectedAction)
         {
-            contactedSpell.ShowWrongActionFeedback(expectedAction);
+            contactedSpell.ShowWrongActionFeedback(expectedAction, action);
             WrongAction?.Invoke(contactedSpell);
             return SpellCounterResult.WrongAction;
         }

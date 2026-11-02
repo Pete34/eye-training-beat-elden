@@ -45,9 +45,12 @@ public sealed class PlayerDamageMeter : MonoBehaviour
         if (ScreenFeedback.IsGameOver)
             return;
 
+        var previousHealth = health;
         health = Mathf.Max(0f, health - (projectile.IsRetaliating ? retaliationDamage : missDamage));
+        var healthLost = previousHealth - health;
+        var percentLost = maxHealth > 0f ? healthLost / maxHealth * 100f : 0f;
         UpdateBar();
-        ScreenFeedback.Flash("HIT!", new Color(1f, 0.25f, 0.2f), 0.8f);
+        ScreenFeedback.Flash(string.Format("-{0}%", Mathf.RoundToInt(percentLost)), new Color(1f, 0.25f, 0.2f), 0.8f);
 
         if (health > 0f)
             return;

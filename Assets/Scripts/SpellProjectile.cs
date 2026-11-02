@@ -24,6 +24,7 @@ public sealed class SpellProjectile : MonoBehaviour
     [SerializeField, Min(0.01f)] private float referenceDistanceMeters = 1f;    [SerializeField, Min(0f)] private float playerAimOffsetMeters = 0.65f;
 
     [SerializeField, Min(0f)] private float missBoundaryMeters = 0.45f;
+    [SerializeField, Min(0.5f)] private float wrongActionHintDurationSeconds = 6f;
     [SerializeField, Min(0f)] private float shardOrbitDegreesPerSecond = 150f;
     [SerializeField, Min(0f)] private float corePulseCyclesPerSecond = 2.5f;
 
@@ -65,7 +66,8 @@ public sealed class SpellProjectile : MonoBehaviour
         float sharedWorldSizeAtReferenceDistance,
         float referenceDistance,
         float missBoundary,
-        SpellGlyphType glyphType)
+        SpellGlyphType glyphType,
+        float wrongActionHintSeconds)
     {
         viewingEye = eye;
         flightDirection = direction.normalized;
@@ -73,6 +75,7 @@ public sealed class SpellProjectile : MonoBehaviour
         worldSizeAtReferenceDistance = Mathf.Max(0.01f, sharedWorldSizeAtReferenceDistance);
         referenceDistanceMeters = Mathf.Max(0.01f, referenceDistance);
         missBoundaryMeters = Mathf.Max(0f, missBoundary);
+        wrongActionHintDurationSeconds = Mathf.Max(0.5f, wrongActionHintSeconds);
         GlyphType = glyphType;        desktopLateralDirection = UnityEngine.Random.value < 0.5f ? -1f : 1f;
 
         IsResolved = false;
@@ -152,13 +155,19 @@ public void BeginRetaliation(float speedMetersPerSecond)
             attackTrail.colorGradient = CreateTrailGradient(retaliationColor);
     }
 
-    public void ShowWrongActionFeedback(SpellCounterAction expectedAction)
+    public void ShowWrongActionFeedback(SpellCounterAction expectedAction, SpellCounterAction attemptedAction)
     {
         var block = expectedAction == SpellCounterAction.PalmBlock;
+        var attemptedLabel = attemptedAction == SpellCounterAction.PalmBlock ? "shield" : "sword";
+        var expectedLabel = block ? "shield block" : "sword slash";
+        var hint = block
+            ? "Hint: hold steady and block (Desktop: Left Mouse / J)."
+            : "Hint: slash quickly (Desktop: Right Mouse / F).";
+
         ScreenFeedback.Flash(
-            block ? "WRONG! USE THE SHIELD" : "WRONG! USE THE SWORD",
+            string.Format("Wrong input: used {0}. Use {1}.\n{2}", attemptedLabel, expectedLabel, hint),
             block ? new Color(1f, 0.82f, 0.3f) : new Color(0.55f, 0.95f, 1f),
-            1.8f);
+            wrongActionHintDurationSeconds);
     }
 
     private Transform CreateVisualPart(string partName, PrimitiveType shape, Vector3 localPosition, Vector3 localScale, Color color)

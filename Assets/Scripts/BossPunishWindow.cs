@@ -9,6 +9,11 @@ public sealed class BossPunishWindow : MonoBehaviour
     [SerializeField] private SpellVolleySpawner volleySpawner;
     [SerializeField] private SpellCounterJudge counterJudge;
     [SerializeField] private Transform bossAnchor;
+    [Header("Training Phases")]
+    [SerializeField] private bool enableTwoPhaseTraining = true;
+    [SerializeField, Min(0.5f)] private float phaseAnnouncementSeconds = 4.5f;
+    [SerializeField] private GameObject phaseTwoBossPrefab;
+    [SerializeField] private Transform phaseTwoSpawnPoint;
     [SerializeField, Min(1)] private int cleanVolleysRequired = 3;
     [SerializeField, Min(1f)] private float windowSeconds = 10f;
     [SerializeField, Min(0.1f)] private float bossHitRadiusMeters = 0.9f;
@@ -34,6 +39,7 @@ public sealed class BossPunishWindow : MonoBehaviour
     private Transform healthBarRoot;
     private Transform healthBarFill;
     private float healthBarHeightOffset;
+    private bool phaseTwoStarted;
 
     public bool WindowActive => windowActive;
     public float BossHealth => bossHealth;
@@ -54,7 +60,23 @@ public sealed class BossPunishWindow : MonoBehaviour
         bossHealth = bossMaxHealth;
         desktopControls = FindAnyObjectByType<DesktopPlayerControls>();
         xrOrigin = FindAnyObjectByType<XROrigin>();
+
+        if (enableTwoPhaseTraining && volleySpawner != null)
+        {
+            volleySpawner.SpawnBlocked = true;
+            volleySpawner.GlyphSpawnMode = SpellGlyphSpawnMode.SwordOnly;
+        }
+
         BuildHealthBar();
+    }
+
+    private void Start()
+    {
+        if (!enableTwoPhaseTraining)
+            return;
+
+        ScreenFeedback.Flash("Training 1: block these symbols with your sword.", new Color(0.55f, 0.95f, 1f), phaseAnnouncementSeconds);
+        StartCoroutine(BeginFirstTrainingPhaseAfterAnnouncement());
     }
 
     private void OnEnable()
@@ -149,9 +171,97 @@ public sealed class BossPunishWindow : MonoBehaviour
             return;
         }
 
+        if (enableTwoPhaseTraining && !phaseTwoStarted)
+        {
+            StartPhaseTwoTraining();
+            return;
+        }
+
         windowActive = false;
         SetBossGlow(false);
         ScreenFeedback.EndGame("VICTORY!", new Color(0.4f, 1f, 0.5f));
+    }
+
+    private IEnumerator BeginFirstTrainingPhaseAfterAnnouncement()
+    {
+        yield return new WaitForSeconds(phaseAnnouncementSeconds);
+
+        if (volleySpawner == null || ScreenFeedback.IsGameOver)
+            yield break;
+
+        volleySpawner.SpawnBlocked = false;
+        volleySpawner.SpawnVolley();
+    }
+
+    private void StartPhaseTwoTraining()
+    {
+        phaseTwoStarted = true;
+        windowActive = false;
+        repelling = false;
+        cleanStreak = 0;
+        nextStrikeTime = 0f;
+        bossHealth = bossMaxHealth;
+        SetBossGlow(false);
+
+        var previousBoss = bossAnchor;
+        var spawnPosition = phaseTwoSpawnPoint != null
+            ? phaseTwoSpawnPoint.position
+            : (previousBoss != null ? previousBoss.position + new Vector3(1.6f, 0f, 0f) : Vector3.zero);
+        var spawnRotation = phaseTwoSpawnPoint != null
+            ? phaseTwoSpawnPoint.rotation
+            : (previousBoss != null ? previousBoss.rotation : Quaternion.identity);
+        Transform nextBoss = null;
+
+        if (phaseTwoBossPrefab != null)
+        {
+            var spawnedBoss = Instantiate(phaseTwoBossPrefab, spawnPosition, spawnRotation);
+            nextBoss = spawnedBoss.transform;
+        }
+        else if (previousBoss != null)
+        {
+            var spawnedBoss = Instantiate(previousBoss.gameObject, spawnPosition, spawnRotation);
+            spawnedBoss.name = previousBoss.gameObject.name + " Phase 2";
+            nextBoss = spawnedBoss.transform;
+        }
+        else if (phaseTwoSpawnPoint != null)
+        {
+            nextBoss = phaseTwoSpawnPoint;
+        }
+
+        if (nextBoss != null)
+        {
+            if (previousBoss != null && previousBoss != nextBoss)
+                previousBoss.gameObject.SetActive(false);
+
+            bossAnchor = nextBoss;
+        }
+        else
+        {
+            Debug.LogWarning("Phase 2 boss could not be created: assign phaseTwoBossPrefab or keep a valid bossAnchor.", this);
+        }
+
+        BuildHealthBar();
+        UpdateHealthBar();
+
+        if (volleySpawner != null)
+        {
+            volleySpawner.GlyphSpawnMode = SpellGlyphSpawnMode.ShieldOnly;
+            volleySpawner.SpawnBlocked = true;
+        }
+
+        ScreenFeedback.Flash("Training 2: block all these orbs with your shield.", new Color(1f, 0.82f, 0.3f), phaseAnnouncementSeconds);
+        StartCoroutine(BeginSecondTrainingPhaseAfterAnnouncement());
+    }
+
+    private IEnumerator BeginSecondTrainingPhaseAfterAnnouncement()
+    {
+        yield return new WaitForSeconds(phaseAnnouncementSeconds);
+
+        if (volleySpawner == null || ScreenFeedback.IsGameOver)
+            yield break;
+
+        volleySpawner.SpawnBlocked = false;
+        volleySpawner.SpawnVolley();
     }
 
     private IEnumerator RepelPlayer()
@@ -192,6 +302,9 @@ public sealed class BossPunishWindow : MonoBehaviour
     {
         if (bossAnchor == null)
             return;
+
+        if (healthBarRoot != null)
+            Destroy(healthBarRoot.gameObject);
 
         var bounds = new Bounds(bossAnchor.position, Vector3.zero);
         foreach (var bossRenderer in bossAnchor.GetComponentsInChildren<Renderer>())

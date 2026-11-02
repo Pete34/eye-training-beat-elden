@@ -27,6 +27,12 @@ public sealed class DesktopPlayerControls : MonoBehaviour
 
     [SerializeField] private bool showDesktopTools = true;
     [SerializeField, Min(0.01f)] private float swordSweepRadiusMeters = 0.35f;
+    [SerializeField, Min(0.05f)] private float shieldHitboxForwardMeters = 0.5f;
+    [SerializeField, Min(0.05f)] private float shieldHitboxHalfWidthMeters = 0.24f;
+    [SerializeField, Min(0.05f)] private float shieldHitboxHalfHeightMeters = 0.28f;
+    [SerializeField, Min(0f)] private float shieldHitboxPaddingMeters = 0.1f;
+    [SerializeField, Min(0f)] private float earlyBlockDepthMeters = 0.9f;
+    [SerializeField, Min(0f)] private float lateBlockDepthMeters = 0.38f;
 
     private bool desktopModeActive;
     private GameObject desktopSword;
@@ -188,7 +194,7 @@ private void TryResolveDesktopToolContacts()
         if (!blockContactResolved && desktopShield != null)
         {
             var progress = (Time.time - blockStartTime) / 0.32f;
-            if (progress >= 0.08f && progress <= 0.9f)
+            if (progress >= 0.05f && progress <= 1.05f)
             {
                 var contact = FindClosestSpellInShieldVolume();
                 if (contact != null)
@@ -197,12 +203,26 @@ private void TryResolveDesktopToolContacts()
                     counterJudge.EvaluateContact(contact, SpellCounterAction.PalmBlock);
                 }
             }
-            else if (progress > 0.9f && !blockWhiffReported)
+            else if (progress > 1.05f && !blockWhiffReported)
             {
                 blockWhiffReported = true;
-                ReportWhiff("TOO EARLY!");
+                ReportBlockWhiff();
             }
         }
+    }
+
+    private void ReportBlockWhiff()
+    {
+        var required = counterJudge != null ? counterJudge.FindNearestRequiredTarget() : null;
+        if (required == null)
+            return;
+
+        if (required.DepthMeters > earlyBlockDepthMeters)
+            ReportWhiff("TOO EARLY!");
+        else if (required.DepthMeters < lateBlockDepthMeters)
+            ReportWhiff("TOO LATE!");
+        else
+            ReportWhiff("BLOCK MISSED!");
     }
 
     // A swing with nothing to hit teaches timing; stay quiet when no spells are in flight.
@@ -247,7 +267,7 @@ private void TryResolveDesktopToolContacts()
     {
         var best = (SpellProjectile)null;
         var bestDepth = float.PositiveInfinity;
-        var padding = 0.08f;
+        var padding = shieldHitboxPaddingMeters;
         var projectiles = volleySpawner.ActiveProjectiles;
         for (var index = 0; index < projectiles.Count; index++)
         {
@@ -258,9 +278,9 @@ private void TryResolveDesktopToolContacts()
             var localPosition = desktopShield.transform.InverseTransformPoint(projectile.transform.position);
             var spellRadius = projectile.transform.lossyScale.x * 0.5f;
             var insideShield = localPosition.z >= -padding - spellRadius
-                && localPosition.z <= 0.3f + padding + spellRadius
-                && Mathf.Abs(localPosition.x) <= 0.17f + padding + spellRadius
-                && Mathf.Abs(localPosition.y) <= 0.23f + padding + spellRadius;
+                && localPosition.z <= shieldHitboxForwardMeters + padding + spellRadius
+                && Mathf.Abs(localPosition.x) <= shieldHitboxHalfWidthMeters + padding + spellRadius
+                && Mathf.Abs(localPosition.y) <= shieldHitboxHalfHeightMeters + padding + spellRadius;
 
             if (insideShield && projectile.DepthMeters < bestDepth)
             {
@@ -299,21 +319,23 @@ private void TryResolveDesktopToolContacts()
 
         desktopShield = new GameObject("Desktop Shield Placeholder");
         desktopShield.transform.SetParent(playerCamera.transform, false);
-        desktopShield.transform.localPosition = new Vector3(-0.43f, -0.25f, 0.82f);
-        desktopShield.transform.localRotation = Quaternion.Euler(0f, 0f, -8f);        shieldRestPosition = desktopShield.transform.localPosition;
+        desktopShield.transform.localPosition = new Vector3(-0.4f, -0.23f, 0.78f);
+        desktopShield.transform.localRotation = Quaternion.Euler(6f, 2f, -10f);        shieldRestPosition = desktopShield.transform.localPosition;
         shieldRestRotation = desktopShield.transform.localRotation;
 
-        CreateToolPart(desktopShield.transform, PrimitiveType.Cube, "Shield Face", Vector3.zero, new Vector3(0.34f, 0.46f, 0.08f), new Color(0.12f, 0.42f, 0.62f));
-        CreateToolPart(desktopShield.transform, PrimitiveType.Cube, "Shield Boss", new Vector3(0f, 0f, 0.055f), new Vector3(0.1f, 0.1f, 0.04f), new Color(0.95f, 0.68f, 0.22f));
+        CreateToolPart(desktopShield.transform, PrimitiveType.Cylinder, "Buckler Face", Vector3.zero, new Vector3(0.16f, 0.03f, 0.16f), new Color(0.14f, 0.44f, 0.64f), Quaternion.Euler(90f, 0f, 0f));
+        CreateToolPart(desktopShield.transform, PrimitiveType.Sphere, "Buckler Boss", new Vector3(0f, 0f, 0.06f), new Vector3(0.11f, 0.11f, 0.11f), new Color(0.95f, 0.68f, 0.22f));
+        CreateToolPart(desktopShield.transform, PrimitiveType.Cube, "Buckler Strap", new Vector3(0f, -0.02f, -0.045f), new Vector3(0.1f, 0.03f, 0.04f), new Color(0.24f, 0.15f, 0.1f));
     }
 
-    private static void CreateToolPart(Transform parent, PrimitiveType primitive, string partName, Vector3 localPosition, Vector3 localScale, Color color)
+    private static void CreateToolPart(Transform parent, PrimitiveType primitive, string partName, Vector3 localPosition, Vector3 localScale, Color color, Quaternion localRotation = default)
     {
         var part = GameObject.CreatePrimitive(primitive);
         part.name = partName;
         part.transform.SetParent(parent, false);
         part.transform.localPosition = localPosition;
         part.transform.localScale = localScale;
+        part.transform.localRotation = localRotation == default ? Quaternion.identity : localRotation;
         var collider = part.GetComponent<Collider>();
         if (collider != null)
             Destroy(collider);

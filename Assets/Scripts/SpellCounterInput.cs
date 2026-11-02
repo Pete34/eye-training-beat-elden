@@ -83,13 +83,29 @@ private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quat
             if (contact != null && counterJudge != null)
                 counterJudge.EvaluateContact(contact, action);
             else if (contact == null && volleySpawner != null && volleySpawner.ActiveProjectiles.Count > 0)
-                ScreenFeedback.Flash("TOO EARLY!", new Color(1f, 0.6f, 0.15f), 1.2f);
+                ReportWhiffFromDepth();
         }
 
         previousPosition = handPosition;
         previousRotation = handRotation;
         hasPose = true;
         triggerWasPressed = triggerPressed;
+    }
+
+    private void ReportWhiffFromDepth()
+    {
+        var required = counterJudge != null ? counterJudge.FindNearestRequiredTarget() : null;
+        var message = "TOO EARLY!";
+
+        if (required != null)
+        {
+            if (required.DepthMeters < 0.38f)
+                message = "TOO LATE!";
+            else if (required.DepthMeters <= 0.9f)
+                message = "MISSED!";
+        }
+
+        ScreenFeedback.Flash(message, new Color(1f, 0.6f, 0.15f), 1.2f);
     }
 
     private SpellProjectile FindSlashContact(Vector3 handPosition, Quaternion handRotation, Vector3 previousPosition, Quaternion previousRotation, bool hasPose)

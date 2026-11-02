@@ -2,6 +2,13 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum SpellGlyphSpawnMode
+{
+    Mixed,
+    SwordOnly,
+    ShieldOnly
+}
+
 public sealed class SpellVolleySpawner : MonoBehaviour
 {
     [Header("References")]
@@ -24,6 +31,9 @@ public sealed class SpellVolleySpawner : MonoBehaviour
     [SerializeField] private bool spawnOnStart = true;
     [SerializeField] private bool autoRepeatVolleys;
     [SerializeField, Min(0f)] private float delayBetweenVolleys = 1f;
+    [SerializeField] private SpellGlyphSpawnMode glyphSpawnMode = SpellGlyphSpawnMode.Mixed;
+    [SerializeField] private bool forgivingTrainingNpc;
+    [SerializeField, Min(0.5f)] private float wrongActionHintDurationSeconds = 6f;
 
     private readonly List<SpellProjectile> activeProjectiles = new List<SpellProjectile>();
     private float nextVolleyTime;    [SerializeField, Min(1f)] private float retaliationSpeedMetersPerSecond = 7f;
@@ -46,6 +56,12 @@ public sealed class SpellVolleySpawner : MonoBehaviour
         set => deltaDifficulty = Mathf.Clamp01(value);
     }
 
+    public SpellGlyphSpawnMode GlyphSpawnMode
+    {
+        get => glyphSpawnMode;
+        set => glyphSpawnMode = value;
+    }
+
     private void Start()
     {
         if (viewingEye == null && Camera.main != null)
@@ -56,6 +72,7 @@ public sealed class SpellVolleySpawner : MonoBehaviour
         {
             counterJudge.WrongAction += OnFailedCounterAttempt;
             counterJudge.OrderError += OnOrderError;
+            counterJudge.CorrectCounter += OnCorrectCounter;
         }
 
         if (spawnOnStart)
@@ -69,9 +86,27 @@ public sealed class SpellVolleySpawner : MonoBehaviour
 
         counterJudge.WrongAction -= OnFailedCounterAttempt;
         counterJudge.OrderError -= OnOrderError;
+        counterJudge.CorrectCounter -= OnCorrectCounter;
     }
 
     private void OnOrderError(SpellProjectile required, SpellProjectile contacted) => OnFailedCounterAttempt(contacted);
+
+    private void OnCorrectCounter(SpellProjectile source)
+    {
+        if (!forgivingTrainingNpc)
+            return;
+
+        for (var index = 0; index < activeProjectiles.Count; index++)
+        {
+            var remainingProjectile = activeProjectiles[index];
+            if (remainingProjectile == null || remainingProjectile == source || remainingProjectile.IsResolved)
+                continue;
+
+            remainingProjectile.MarkCountered();
+        }
+
+        ScreenFeedback.Flash("Clean counter! Extra orb cleared for training.", new Color(0.58f, 0.95f, 0.55f), 1.6f);
+    }
 
     // A botched counter attempt also provokes the remaining spells.
     private void OnFailedCounterAttempt(SpellProjectile source)
@@ -147,7 +182,7 @@ private void Update()
             spellObject.transform.rotation = Quaternion.LookRotation(rayDirection);
 
             var projectile = spellObject.AddComponent<SpellProjectile>();
-            var glyph = (SpellGlyphType)UnityEngine.Random.Range(0, 3);
+            var glyph = PickGlyph();
             var speed = UnityEngine.Random.Range(minimumSpeedMetersPerSecond, maximumSpeedMetersPerSecond);
             projectile.Initialize(
                 viewingEye,
@@ -156,7 +191,8 @@ private void Update()
                 sharedWorldSizeAtReferenceDistance,
                 referenceDistanceMeters,
                 missBoundaryMeters,
-                glyph);
+                glyph,
+                wrongActionHintDurationSeconds);
 
             projectile.BuildAttackVisuals();
             CreateGlyphMark(spellObject.transform, glyph);
@@ -168,6 +204,19 @@ private void Update()
         volleyHadMiss = false;
         nextVolleyTime = Time.time + delayBetweenVolleys;
         return true;
+    }
+
+    private SpellGlyphType PickGlyph()
+    {
+        switch (glyphSpawnMode)
+        {
+            case SpellGlyphSpawnMode.SwordOnly:
+                return UnityEngine.Random.value < 0.5f ? SpellGlyphType.SlashArc : SpellGlyphType.SlashCross;
+            case SpellGlyphSpawnMode.ShieldOnly:
+                return SpellGlyphType.ShieldRune;
+            default:
+                return (SpellGlyphType)UnityEngine.Random.Range(0, 3);
+        }
     }
 
     public void SetDepthDifficulty(float value)
