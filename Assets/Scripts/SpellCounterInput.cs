@@ -10,7 +10,7 @@ public sealed class SpellCounterInput : MonoBehaviour
     [SerializeField] private SpellCounterJudge counterJudge;
     [SerializeField, Min(0.1f)] private float slashSpeedThreshold = 1.2f;
     [SerializeField, Min(0.1f)] private float swordLengthMeters = 0.8f;
-    [SerializeField, Min(0.001f)] private float swordCollisionRadiusMeters = 0.07f;
+    [SerializeField, Min(0.001f)] private float swordCollisionRadiusMeters = 0.3f;
     [SerializeField, Min(0.01f)] private float shieldProjectionMeters = 0.45f;
     [SerializeField, Min(0.01f)] private float shieldWidthMeters = 0.35f;
     [SerializeField, Min(0.01f)] private float shieldHeightMeters = 0.4f;
@@ -77,8 +77,13 @@ private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quat
                 ? FindSlashContact(handPosition, handRotation, previousPosition, previousRotation, hasPose)
                 : FindShieldContact(handPosition, handRotation);
 
+            if (action == SpellCounterAction.Slash && counterJudge != null)
+                counterJudge.ReportSlash(handPosition, handPosition + handRotation * Vector3.forward * swordLengthMeters * 1.1f);
+
             if (contact != null && counterJudge != null)
                 counterJudge.EvaluateContact(contact, action);
+            else if (contact == null && volleySpawner != null && volleySpawner.ActiveProjectiles.Count > 0)
+                ScreenFeedback.Flash("TOO EARLY!", new Color(1f, 0.6f, 0.15f), 1.2f);
         }
 
         previousPosition = handPosition;

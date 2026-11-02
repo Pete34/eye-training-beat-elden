@@ -2140,6 +2140,8 @@ GameObject:
   - component: {fileID: 1867595479}
   - component: {fileID: 1867595483}
   - component: {fileID: 1867595484}
+  - component: {fileID: 1867595486}
+  - component: {fileID: 1867595485}
   m_Layer: 0
   m_Name: Spell Duel Gameplay
   m_TagString: Untagged
@@ -2163,7 +2165,7 @@ MonoBehaviour:
   counterJudge: {fileID: 0}
   slashSpeedThreshold: 1.2
   swordLengthMeters: 0.8
-  swordCollisionRadiusMeters: 0.07
+  swordCollisionRadiusMeters: 0.3
   shieldProjectionMeters: 0.45
   shieldWidthMeters: 0.35
   shieldHeightMeters: 0.4
@@ -2200,8 +2202,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SpellVolleySpawner
   viewingEye: {fileID: 0}
   bossAnchor: {fileID: 410275318}
-  minimumSpells: 3
-  maximumSpells: 3
+  minimumSpells: 2
+  maximumSpells: 2
   minimumSpeedMetersPerSecond: 0.35
   maximumSpeedMetersPerSecond: 0.6
   sharedWorldSizeAtReferenceDistance: 0.12
@@ -2267,8 +2269,52 @@ MonoBehaviour:
   counterJudge: {fileID: 0}
   moveSpeedMetersPerSecond: 2.5
   sprintMultiplier: 1.8
-  arenaMovementRadiusMeters: 2
+  arenaMovementRadiusMeters: 6
   showDesktopTools: 1
+  swordSweepRadiusMeters: 0.35
+--- !u!114 &1867595485
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1867595478}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 52c892fec85a0c89d89192f8ceb08659, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BossPunishWindow
+  volleySpawner: {fileID: 0}
+  counterJudge: {fileID: 0}
+  bossAnchor: {fileID: 0}
+  cleanVolleysRequired: 3
+  windowSeconds: 8
+  bossHitRadiusMeters: 0.6
+  bossMaxHealth: 100
+  strikeDamage: 25
+  strikeCooldownSeconds: 0.45
+  desktopReachMarginMeters: 0.6
+  repelSeconds: 0.5
+  healthBarWidthMeters: 1.2
+--- !u!114 &1867595486
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1867595478}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0c5f386395ad2fbab9f54dc664e0639b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerDamageMeter
+  volleySpawner: {fileID: 0}
+  viewCamera: {fileID: 0}
+  maxHealth: 100
+  missDamage: 10
+  retaliationDamage: 20
+  barLocalPosition: {x: 0, y: -0.3, z: 1}
+  barWidthMeters: 0.5
 --- !u!1 &2008637552
 GameObject:
   m_ObjectHideFlags: 0

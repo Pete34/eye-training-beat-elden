@@ -13,7 +13,20 @@ public sealed class DesktopPlayerControls : MonoBehaviour
     [SerializeField, Min(1f)] private float sprintMultiplier = 1.8f;    [SerializeField, Min(0.5f)] private float arenaMovementRadiusMeters = 2f;
     private Vector3 movementOriginPosition;
 
+    public float ArenaMovementRadiusMeters
+    {
+        get => arenaMovementRadiusMeters;
+        set => arenaMovementRadiusMeters = Mathf.Max(0.5f, value);
+    }
+
+    public void ReturnToStart()
+    {
+        if (xrOrigin != null)
+            xrOrigin.transform.position = movementOriginPosition;
+    }
+
     [SerializeField] private bool showDesktopTools = true;
+    [SerializeField, Min(0.01f)] private float swordSweepRadiusMeters = 0.35f;
 
     private bool desktopModeActive;
     private GameObject desktopSword;
@@ -26,6 +39,10 @@ public sealed class DesktopPlayerControls : MonoBehaviour
     private bool blockContactResolved;    private Vector3 previousSwordBase;
     private Vector3 previousSwordTip;
     private bool hasPreviousSwordPose;
+    private bool slashWhiffReported = true;
+    private bool blockWhiffReported = true;
+
+    public bool MovementLocked { get; set; }
 
 
 
@@ -72,7 +89,7 @@ private void Update()
 
     public void MovePlayer(Vector2 axes, bool sprint, float deltaTime)
     {
-        if (!desktopModeActive || xrOrigin == null)
+        if (!desktopModeActive || xrOrigin == null || MovementLocked)
             return;
 
         var cameraForward = playerCamera != null ? playerCamera.transform.forward : xrOrigin.transform.forward;
@@ -97,6 +114,7 @@ public void TriggerSlashAnimation()
 
         slashStartTime = Time.time - 0.07f;
         slashContactResolved = false;
+        slashWhiffReported = false;
         hasPreviousSwordPose = false;
         UpdateCounterToolAnimations();
     }
@@ -108,6 +126,7 @@ public void TriggerBlockAnimation()
 
         blockStartTime = Time.time - 0.08f;
         blockContactResolved = false;
+        blockWhiffReported = false;
         UpdateCounterToolAnimations();
     }
 
@@ -143,6 +162,7 @@ private void TryResolveDesktopToolContacts()
             {
                 var swordBase = desktopSword.transform.TransformPoint(new Vector3(0f, 0f, 0.18f));
                 var swordTip = desktopSword.transform.TransformPoint(new Vector3(0f, 0f, 1.04f));
+                counterJudge.ReportSlash(swordBase, swordTip);
                 var contact = FindClosestSpellInSweptSwordVolume(swordBase, swordTip);
                 if (contact != null)
                 {
@@ -157,6 +177,11 @@ private void TryResolveDesktopToolContacts()
             else
             {
                 hasPreviousSwordPose = false;
+                if (progress > 0.95f && !slashWhiffReported)
+                {
+                    slashWhiffReported = true;
+                    ReportWhiff("TOO EARLY!");
+                }
             }
         }
 
@@ -172,10 +197,22 @@ private void TryResolveDesktopToolContacts()
                     counterJudge.EvaluateContact(contact, SpellCounterAction.PalmBlock);
                 }
             }
+            else if (progress > 0.9f && !blockWhiffReported)
+            {
+                blockWhiffReported = true;
+                ReportWhiff("TOO EARLY!");
+            }
         }
     }
 
-private SpellProjectile FindClosestSpellInSweptSwordVolume(Vector3 swordBase, Vector3 swordTip)
+    // A swing with nothing to hit teaches timing; stay quiet when no spells are in flight.
+    private void ReportWhiff(string message)
+    {
+        if (volleySpawner.ActiveProjectiles.Count > 0)
+            ScreenFeedback.Flash(message, new Color(1f, 0.6f, 0.15f), 1.2f);
+    }
+
+    private SpellProjectile FindClosestSpellInSweptSwordVolume(Vector3 swordBase, Vector3 swordTip)
     {
         var best = (SpellProjectile)null;
         var bestDepth = float.PositiveInfinity;
@@ -196,7 +233,7 @@ private SpellProjectile FindClosestSpellInSweptSwordVolume(Vector3 swordBase, Ve
                 minimumDistance = Mathf.Min(minimumDistance, DistanceToSegment(spellPosition, previousSwordBase, previousSwordTip));
             }
 
-            if (minimumDistance <= 0.09f + spellRadius && projectile.DepthMeters < bestDepth)
+            if (minimumDistance <= swordSweepRadiusMeters + spellRadius && projectile.DepthMeters < bestDepth)
             {
                 best = projectile;
                 bestDepth = projectile.DepthMeters;

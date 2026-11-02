@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public enum SpellGlyphType
@@ -23,12 +24,21 @@ public sealed class SpellProjectile : MonoBehaviour
     [SerializeField, Min(0.01f)] private float referenceDistanceMeters = 1f;    [SerializeField, Min(0f)] private float playerAimOffsetMeters = 0.65f;
 
     [SerializeField, Min(0f)] private float missBoundaryMeters = 0.45f;
+    [SerializeField, Min(0f)] private float shardOrbitDegreesPerSecond = 150f;
+    [SerializeField, Min(0f)] private float corePulseCyclesPerSecond = 2.5f;
 
     public event Action<SpellProjectile> Missed;
 
     public SpellGlyphType GlyphType { get; private set; }
     public float DepthMeters { get; private set; }
     public bool IsResolved { get; private set; }
+    private Transform spellCore;
+    private Transform[] orbitingShards;
+    private Renderer[] shardRenderers;
+    private readonly List<Material> attackMaterials = new List<Material>();
+    private TrailRenderer attackTrail;
+    private Color shardColor;
+    private Color trailColor;
     public float SpeedMetersPerSecond => speedOverrideMetersPerSecond > 0f
         ? speedOverrideMetersPerSecond
         : speedMetersPerSecond * (UnityEngine.XR.XRSettings.isDeviceActive ? 1f : desktopSpeedMultiplier);
@@ -69,6 +79,37 @@ public sealed class SpellProjectile : MonoBehaviour
         RefreshDepthAndApparentSize();
     }
 
+    public void BuildAttackVisuals()
+    {
+        var shieldSpell = GlyphType == SpellGlyphType.ShieldRune;
+        shardColor = shieldSpell ? new Color(1f, 0.43f, 0.08f) : new Color(0.08f, 0.55f, 1f);
+        trailColor = shieldSpell ? new Color(1f, 0.68f, 0.2f) : new Color(0.25f, 0.85f, 1f);
+
+        var bodyRenderer = GetComponent<Renderer>();
+        if (bodyRenderer != null)
+            bodyRenderer.enabled = false;
+
+        var coreColor = shieldSpell ? new Color(1f, 0.83f, 0.4f) : new Color(0.55f, 0.95f, 1f);
+        spellCore = CreateVisualPart("Spell Core", PrimitiveType.Sphere, Vector3.zero, Vector3.one * 0.58f, coreColor);
+        orbitingShards = new Transform[3];
+        shardRenderers = new Renderer[3];
+        for (var index = 0; index < orbitingShards.Length; index++)
+        {
+            var shard = CreateVisualPart("Orbiting Shard", PrimitiveType.Cube, Vector3.zero, new Vector3(0.13f, 0.42f, 0.12f), shardColor);
+            shard.localRotation = Quaternion.Euler(0f, 0f, index * 120f);
+            orbitingShards[index] = shard;
+            shardRenderers[index] = shard.GetComponent<Renderer>();
+        }
+
+        attackTrail = gameObject.AddComponent<TrailRenderer>();
+        attackTrail.time = 0.36f;
+        attackTrail.minVertexDistance = 0.01f;
+        attackTrail.alignment = LineAlignment.View;
+        attackTrail.numCapVertices = 2;
+        attackTrail.sharedMaterial = CreateAttackMaterial(trailColor);
+        attackTrail.colorGradient = CreateTrailGradient(trailColor);
+    }
+
 private void Update()
     {
         if (viewingEye == null || IsResolved)
@@ -77,6 +118,8 @@ private void Update()
         var targetPoint = viewingEye.position - viewingEye.up * playerAimOffsetMeters;
         flightDirection = (targetPoint - transform.position).normalized;
         transform.position += flightDirection * SpeedMetersPerSecond * Time.deltaTime;        transform.rotation = Quaternion.LookRotation(-flightDirection, viewingEye.up);
+
+        AnimateAttackVisuals();
 
         RefreshDepthAndApparentSize();
 
@@ -97,6 +140,100 @@ public void BeginRetaliation(float speedMetersPerSecond)
         var spellRenderer = GetComponent<Renderer>();
         if (spellRenderer != null)
             spellRenderer.material.color = new Color(1f, 0.12f, 0.04f, 1f);
+
+        var retaliationColor = new Color(1f, 0.08f, 0.015f);
+        for (var index = 0; index < shardRenderers.Length; index++)
+        {
+            if (shardRenderers[index] != null)
+                shardRenderers[index].material.color = retaliationColor;
+        }
+
+        if (attackTrail != null)
+            attackTrail.colorGradient = CreateTrailGradient(retaliationColor);
+    }
+
+    public void ShowWrongActionFeedback(SpellCounterAction expectedAction)
+    {
+        var block = expectedAction == SpellCounterAction.PalmBlock;
+        ScreenFeedback.Flash(
+            block ? "WRONG! USE THE SHIELD" : "WRONG! USE THE SWORD",
+            block ? new Color(1f, 0.82f, 0.3f) : new Color(0.55f, 0.95f, 1f),
+            1.8f);
+    }
+
+    private Transform CreateVisualPart(string partName, PrimitiveType shape, Vector3 localPosition, Vector3 localScale, Color color)
+    {
+        var part = GameObject.CreatePrimitive(shape);
+        part.name = partName;
+        part.transform.SetParent(transform, false);
+        part.transform.localPosition = localPosition;
+        part.transform.localScale = localScale;
+
+        var collider = part.GetComponent<Collider>();
+        if (collider != null)
+            Destroy(collider);
+
+        var renderer = part.GetComponent<Renderer>();
+        renderer.sharedMaterial = CreateAttackMaterial(color);
+        return part.transform;
+    }
+
+    private Material CreateAttackMaterial(Color color)
+    {
+        var shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null)
+            shader = Shader.Find("Unlit/Color");
+        if (shader == null)
+            shader = Shader.Find("Standard");
+
+        var material = new Material(shader) { color = color };
+        if (material.HasProperty("_EmissionColor"))
+        {
+            material.EnableKeyword("_EMISSION");
+            material.SetColor("_EmissionColor", color * 1.8f);
+        }
+
+        attackMaterials.Add(material);
+        return material;
+    }
+
+    private void AnimateAttackVisuals()
+    {
+        if (orbitingShards == null)
+            return;
+
+        var pulse = 1f + Mathf.Sin(Time.time * corePulseCyclesPerSecond * Mathf.PI * 2f) * 0.1f;
+        spellCore.localScale = Vector3.one * 0.58f * pulse;
+
+        for (var index = 0; index < orbitingShards.Length; index++)
+        {
+            var angle = Time.time * shardOrbitDegreesPerSecond + index * 120f;
+            var rotation = Quaternion.Euler(0f, 0f, angle);
+            orbitingShards[index].localPosition = rotation * new Vector3(0.58f, 0f, 0.08f);
+            orbitingShards[index].localRotation = rotation * Quaternion.Euler(0f, 0f, 35f);
+        }
+
+        if (attackTrail != null)
+        {
+            var apparentSize = worldSizeAtReferenceDistance * Mathf.Max(0f, DepthMeters) / referenceDistanceMeters;
+            attackTrail.startWidth = apparentSize * 0.18f;
+            attackTrail.endWidth = apparentSize * 0.01f;
+        }
+    }
+
+    private static Gradient CreateTrailGradient(Color color)
+    {
+        var gradient = new Gradient();
+        gradient.SetKeys(
+            new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(color, 1f) },
+            new[] { new GradientAlphaKey(0.9f, 0f), new GradientAlphaKey(0f, 1f) });
+        return gradient;
+    }
+
+    private void OnDestroy()
+    {
+        for (var index = 0; index < attackMaterials.Count; index++)
+            Destroy(attackMaterials[index]);
     }
 
 public void MarkCountered()

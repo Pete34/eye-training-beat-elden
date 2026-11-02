@@ -9,8 +9,8 @@ public sealed class SpellVolleySpawner : MonoBehaviour
     [SerializeField] private Transform bossAnchor;
 
     [Header("Volley")]
-    [SerializeField, Min(3)] private int minimumSpells = 3;
-    [SerializeField, Min(3)] private int maximumSpells = 3;
+    [SerializeField, Min(1)] private int minimumSpells = 2;
+    [SerializeField, Min(1)] private int maximumSpells = 2;
     [SerializeField, Min(0.01f)] private float minimumSpeedMetersPerSecond = 0.35f;
     [SerializeField, Min(0.01f)] private float maximumSpeedMetersPerSecond = 0.6f;
     [SerializeField, Min(0.01f)] private float sharedWorldSizeAtReferenceDistance = 0.12f;
@@ -32,6 +32,13 @@ public sealed class SpellVolleySpawner : MonoBehaviour
 
     public IReadOnlyList<SpellProjectile> ActiveProjectiles => activeProjectiles;    public event Action<SpellProjectile> RetaliationStarted;
     public event Action<SpellProjectile> RetaliationImpact;
+    public event Action<SpellProjectile> ProjectileHitPlayer;
+    public event Action<bool> VolleyCompleted;
+
+    private SpellCounterJudge counterJudge;
+    private bool volleyHadMiss;
+
+    public bool SpawnBlocked { get; set; }
 
     public float DeltaDifficulty
     {
@@ -44,12 +51,37 @@ public sealed class SpellVolleySpawner : MonoBehaviour
         if (viewingEye == null && Camera.main != null)
             viewingEye = Camera.main.transform;
 
+        counterJudge = FindAnyObjectByType<SpellCounterJudge>();
+        if (counterJudge != null)
+        {
+            counterJudge.WrongAction += OnFailedCounterAttempt;
+            counterJudge.OrderError += OnOrderError;
+        }
+
         if (spawnOnStart)
             SpawnVolley();
     }
 
+    private void OnDestroy()
+    {
+        if (counterJudge == null)
+            return;
+
+        counterJudge.WrongAction -= OnFailedCounterAttempt;
+        counterJudge.OrderError -= OnOrderError;
+    }
+
+    private void OnOrderError(SpellProjectile required, SpellProjectile contacted) => OnFailedCounterAttempt(contacted);
+
+    // A botched counter attempt also provokes the remaining spells.
+    private void OnFailedCounterAttempt(SpellProjectile source)
+    {
+        StartRetaliation(source);
+    }
+
 private void Update()
     {
+        var hadProjectiles = activeProjectiles.Count > 0;
         for (var index = activeProjectiles.Count - 1; index >= 0; index--)
         {
             var projectile = activeProjectiles[index];
@@ -57,12 +89,15 @@ private void Update()
                 activeProjectiles.RemoveAt(index);
         }
 
+        if (hadProjectiles && activeProjectiles.Count == 0)
+            VolleyCompleted?.Invoke(!volleyHadMiss);
+
         if (autoRepeatVolleys && activeProjectiles.Count == 0 && Time.time >= nextVolleyTime)
             SpawnVolley();
     }
 
     public bool SpawnVolley()
-    {        if (activeProjectiles.Count > 0 || Time.time < nextVolleyTime)
+    {        if (SpawnBlocked || activeProjectiles.Count > 0 || Time.time < nextVolleyTime)
             return false;
 
 
@@ -95,12 +130,11 @@ private void Update()
         for (var index = 0; index < spellCount; index++)
         {
             var depth = UnityEngine.Random.Range(nearDepth, farDepth);
-            var column = index % 3;
-            var row = index / 3;
+            var row = 0;
             var desktopPreview = !UnityEngine.XR.XRSettings.isDeviceActive;
-            var laneSpacing = desktopPreview ? 0.45f : 0.3f;
-            var laneJitter = desktopPreview ? 0.02f : 0.04f;
-            var horizontalOffset = (column - 1) * laneSpacing + UnityEngine.Random.Range(-laneJitter, laneJitter);
+            var laneSpacing = desktopPreview ? 0.22f : 0.18f;
+            var laneJitter = desktopPreview ? 0.02f : 0.03f;
+            var horizontalOffset = (index - (spellCount - 1) * 0.5f) * laneSpacing + UnityEngine.Random.Range(-laneJitter, laneJitter);
             var baseVerticalOffset = desktopPreview ? 0.22f : (row == 0 ? 0.06f : -0.18f);
             var verticalOffset = baseVerticalOffset + UnityEngine.Random.Range(-0.02f, 0.02f);
             var rayDirection = (viewingEye.forward + viewingEye.right * horizontalOffset + viewingEye.up * verticalOffset).normalized;
@@ -124,12 +158,14 @@ private void Update()
                 missBoundaryMeters,
                 glyph);
 
+            projectile.BuildAttackVisuals();
             CreateGlyphMark(spellObject.transform, glyph);
             projectile.Missed += OnProjectileMissed;
             activeProjectiles.Add(projectile);
         }
 
         retaliationStartedThisVolley = false;
+        volleyHadMiss = false;
         nextVolleyTime = Time.time + delayBetweenVolleys;
         return true;
     }
@@ -141,6 +177,9 @@ private void Update()
 
 private void OnProjectileMissed(SpellProjectile projectile)
     {
+        volleyHadMiss = true;
+        ProjectileHitPlayer?.Invoke(projectile);
+
         if (projectile.IsRetaliating)
         {
             RetaliationImpact?.Invoke(projectile);
@@ -151,12 +190,16 @@ private void OnProjectileMissed(SpellProjectile projectile)
 
         Debug.Log(string.Format("Missed spell: {0}", projectile.GlyphType), projectile);
         Destroy(projectile.gameObject);
+        StartRetaliation(projectile);
+    }
 
+    private void StartRetaliation(SpellProjectile source)
+    {
         if (retaliationStartedThisVolley)
             return;
 
         retaliationStartedThisVolley = true;
-        RetaliationStarted?.Invoke(projectile);
+        RetaliationStarted?.Invoke(source);
         for (var index = 0; index < activeProjectiles.Count; index++)
         {
             var remainingProjectile = activeProjectiles[index];
@@ -199,5 +242,16 @@ private void OnProjectileMissed(SpellProjectile projectile)
         var collider = piece.GetComponent<Collider>();
         if (collider != null)
             Destroy(collider);
+
+        var renderer = piece.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            renderer.material.color = new Color(0.92f, 0.98f, 1f);
+            if (renderer.material.HasProperty("_EmissionColor"))
+            {
+                renderer.material.EnableKeyword("_EMISSION");
+                renderer.material.SetColor("_EmissionColor", new Color(0.6f, 0.9f, 1f));
+            }
+        }
     }
 }

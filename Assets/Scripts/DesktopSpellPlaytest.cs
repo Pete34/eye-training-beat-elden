@@ -70,9 +70,9 @@ private void Update()
             if (playtestCamera != null && counterJudge != null)
             {
                 if (mouse.leftButton.wasPressedThisFrame)
-                    TryMouseCounter(SpellCounterAction.Slash, mouse);
+                    TryMouseCounter(SpellCounterAction.PalmBlock);
                 else if (mouse.rightButton.wasPressedThisFrame)
-                    TryMouseCounter(SpellCounterAction.PalmBlock, mouse);
+                    TryMouseCounter(SpellCounterAction.Slash);
             }
         }
 
@@ -125,7 +125,7 @@ private void ToggleTopDownView()
         }
     }
 
-private void TryMouseCounter(SpellCounterAction action, Mouse mouse)
+    private void TryMouseCounter(SpellCounterAction action)
     {
         var playerTools = FindAnyObjectByType<DesktopPlayerControls>();
         if (playerTools == null)

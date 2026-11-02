@@ -26,6 +26,10 @@ public sealed class SpellCounterJudge : MonoBehaviour
     public event Action<SpellProjectile> CorrectCounter;
     public event Action<SpellProjectile> WrongAction;
     public event Action<SpellProjectile, SpellProjectile> OrderError;
+    public event Action<Vector3, Vector3> SlashSwept;
+
+    // Slash sources report their sword segment so the boss punish window can test it.
+    public void ReportSlash(Vector3 swordBase, Vector3 swordTip) => SlashSwept?.Invoke(swordBase, swordTip);
 
     private void Awake()
     {
@@ -88,6 +92,7 @@ public sealed class SpellCounterJudge : MonoBehaviour
 
         if (action != expectedAction)
         {
+            contactedSpell.ShowWrongActionFeedback(expectedAction);
             WrongAction?.Invoke(contactedSpell);
             return SpellCounterResult.WrongAction;
         }
