@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.XR.CoreUtils;
 using UnityEngine;
 
 public enum SpellGlyphType
@@ -21,7 +22,10 @@ public sealed class SpellProjectile : MonoBehaviour
 
 
     [SerializeField, Min(0.01f)] private float worldSizeAtReferenceDistance = 0.12f;
-    [SerializeField, Min(0.01f)] private float referenceDistanceMeters = 1f;    [SerializeField, Min(0f)] private float playerAimOffsetMeters = 0.65f;
+    [SerializeField, Min(0.01f)] private float referenceDistanceMeters = 1f;
+    [SerializeField, Min(0f)] private float playerAimOffsetMeters = 0.65f;
+    [SerializeField, Min(0f)] private float slotCatchUpMetersPerSecond = 0.35f;
+    [SerializeField, Min(0f)] private float hangDurationSeconds = 0.6f;
 
     [SerializeField, Min(0f)] private float missBoundaryMeters = 0.45f;
     [SerializeField, Min(0.5f)] private float wrongActionHintDurationSeconds = 6f;
@@ -40,6 +44,11 @@ public sealed class SpellProjectile : MonoBehaviour
     private TrailRenderer attackTrail;
     private Color shardColor;
     private Color trailColor;
+    private Transform bodyRoot;
+    private float approachDepthMeters;
+    private float homeRightMeters;
+    private float hangTimeRemaining;
+    private bool hasLaneSlot;
     public float SpeedMetersPerSecond => speedOverrideMetersPerSecond > 0f
         ? speedOverrideMetersPerSecond
         : speedMetersPerSecond * (UnityEngine.XR.XRSettings.isDeviceActive ? 1f : desktopSpeedMultiplier);
@@ -67,7 +76,9 @@ public sealed class SpellProjectile : MonoBehaviour
         float referenceDistance,
         float missBoundary,
         SpellGlyphType glyphType,
-        float wrongActionHintSeconds)
+        float wrongActionHintSeconds,
+        float slotCatchUpSpeedMetersPerSecond,
+        float hangSeconds)
     {
         viewingEye = eye;
         flightDirection = direction.normalized;
@@ -76,9 +87,14 @@ public sealed class SpellProjectile : MonoBehaviour
         referenceDistanceMeters = Mathf.Max(0.01f, referenceDistance);
         missBoundaryMeters = Mathf.Max(0f, missBoundary);
         wrongActionHintDurationSeconds = Mathf.Max(0.5f, wrongActionHintSeconds);
-        GlyphType = glyphType;        desktopLateralDirection = UnityEngine.Random.value < 0.5f ? -1f : 1f;
+        slotCatchUpMetersPerSecond = Mathf.Max(0f, slotCatchUpSpeedMetersPerSecond);
+        hangDurationSeconds = Mathf.Max(0f, hangSeconds);
+        hangTimeRemaining = hangDurationSeconds;
+        GlyphType = glyphType;
+        desktopLateralDirection = UnityEngine.Random.value < 0.5f ? -1f : 1f;
 
         IsResolved = false;
+        CaptureLaneSlot();
         RefreshDepthAndApparentSize();
     }
 
@@ -118,12 +134,21 @@ private void Update()
         if (viewingEye == null || IsResolved)
             return;
 
-        var targetPoint = viewingEye.position - viewingEye.up * playerAimOffsetMeters;
-        flightDirection = (targetPoint - transform.position).normalized;
-        transform.position += flightDirection * SpeedMetersPerSecond * Time.deltaTime;        transform.rotation = Quaternion.LookRotation(-flightDirection, viewingEye.up);
+        // The hang holds the spell in the room so the player can step into a sword or shield line.
+        // When it releases, the lane is taken from where the player is standing then.
+        // Sideways catch-up stays slow, so that lineup is not erased during the approach.
+        if (hangTimeRemaining > 0f && !IsRetaliating)
+        {
+            hangTimeRemaining -= Time.deltaTime;
+            if (hangTimeRemaining <= 0f)
+                CaptureLaneSlot();
+        }
+        else if (IsRetaliating || !hasLaneSlot)
+            ChaseTorso();
+        else
+            AdvanceLaneSlot(Time.deltaTime);
 
         AnimateAttackVisuals();
-
         RefreshDepthAndApparentSize();
 
         if (DepthMeters <= missBoundaryMeters)
@@ -131,6 +156,78 @@ private void Update()
             IsResolved = true;
             Missed?.Invoke(this);
         }
+    }
+
+    private void CaptureLaneSlot()
+    {
+        if (!TryGetApproachFrame(out var chest, out var forward, out var right))
+            return;
+
+        var offset = transform.position - chest;
+        approachDepthMeters = Vector3.Dot(offset, forward);
+        homeRightMeters = Vector3.Dot(offset, right);
+        hasLaneSlot = true;
+    }
+
+    private void AdvanceLaneSlot(float deltaTime)
+    {
+        if (!TryGetApproachFrame(out var chest, out var forward, out var right))
+            return;
+
+        var previousPosition = transform.position;
+        approachDepthMeters -= SpeedMetersPerSecond * deltaTime;
+
+        var offset = previousPosition - chest;
+        var nextRight = Mathf.MoveTowards(Vector3.Dot(offset, right), homeRightMeters, slotCatchUpMetersPerSecond * deltaTime);
+        var nextUp = Mathf.MoveTowards(offset.y, 0f, SpeedMetersPerSecond * deltaTime);
+        var nextPosition = chest + forward * approachDepthMeters + right * nextRight + Vector3.up * nextUp;
+        transform.position = nextPosition;
+
+        var travel = nextPosition - previousPosition;
+        if (travel.sqrMagnitude > 0.0000001f)
+            flightDirection = travel.normalized;
+
+        transform.rotation = Quaternion.LookRotation(-flightDirection, viewingEye.up);
+    }
+
+    private void ChaseTorso()
+    {
+        var targetPoint = viewingEye.position - Vector3.up * playerAimOffsetMeters;
+        var toTarget = targetPoint - transform.position;
+        if (toTarget.sqrMagnitude < 0.000001f)
+            return;
+
+        flightDirection = toTarget.normalized;
+        transform.position += flightDirection * SpeedMetersPerSecond * Time.deltaTime;
+        transform.rotation = Quaternion.LookRotation(-flightDirection, viewingEye.up);
+    }
+
+    private bool TryGetApproachFrame(out Vector3 chest, out Vector3 forward, out Vector3 right)
+    {
+        chest = default;
+        forward = Vector3.forward;
+        right = Vector3.right;
+        if (viewingEye == null)
+            return false;
+
+        if (bodyRoot == null)
+        {
+            var origin = FindAnyObjectByType<XROrigin>();
+            if (origin != null)
+                bodyRoot = origin.transform;
+        }
+
+        var facing = bodyRoot != null ? bodyRoot.forward : viewingEye.forward;
+        var planar = Vector3.ProjectOnPlane(facing, Vector3.up);
+        if (planar.sqrMagnitude < 0.0001f)
+            planar = Vector3.ProjectOnPlane(viewingEye.forward, Vector3.up);
+        if (planar.sqrMagnitude < 0.0001f)
+            return false;
+
+        forward = planar.normalized;
+        right = Vector3.Cross(Vector3.up, forward);
+        chest = viewingEye.position - Vector3.up * playerAimOffsetMeters;
+        return true;
     }
 
 public void BeginRetaliation(float speedMetersPerSecond)
@@ -212,7 +309,10 @@ public void BeginRetaliation(float speedMetersPerSecond)
             return;
 
         var pulse = 1f + Mathf.Sin(Time.time * corePulseCyclesPerSecond * Mathf.PI * 2f) * 0.1f;
-        spellCore.localScale = Vector3.one * 0.58f * pulse;
+        var charge = hangDurationSeconds <= 0f || hangTimeRemaining <= 0f
+            ? 1f
+            : Mathf.Lerp(0.72f, 1f, 1f - Mathf.Clamp01(hangTimeRemaining / hangDurationSeconds));
+        spellCore.localScale = Vector3.one * 0.58f * pulse * charge;
 
         for (var index = 0; index < orbitingShards.Length; index++)
         {

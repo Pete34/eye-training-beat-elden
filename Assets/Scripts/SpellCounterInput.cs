@@ -10,11 +10,10 @@ public sealed class SpellCounterInput : MonoBehaviour
     [SerializeField] private SpellCounterJudge counterJudge;
     [SerializeField, Min(0.1f)] private float slashSpeedThreshold = 1.2f;
     [SerializeField, Min(0.1f)] private float swordLengthMeters = 0.8f;
-    [SerializeField, Min(0.001f)] private float swordCollisionRadiusMeters = 0.3f;
-    [SerializeField, Min(0.01f)] private float shieldProjectionMeters = 0.45f;
-    [SerializeField, Min(0.01f)] private float shieldWidthMeters = 0.35f;
+    [SerializeField, Min(0.01f)] private float shieldProjectionMeters = 0.16f;
+    [SerializeField, Min(0.01f)] private float shieldWidthMeters = 0.4f;
     [SerializeField, Min(0.01f)] private float shieldHeightMeters = 0.4f;
-    [SerializeField, Min(0f)] private float shieldPaddingMeters = 0.08f;
+    [SerializeField, Min(0f)] private float shieldPaddingMeters = 0f;
     [SerializeField] private bool enableEditorKeyboardTesting = true;
 
     private XROrigin xrOrigin;
@@ -113,10 +112,6 @@ private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quat
         var best = (SpellProjectile)null;
         var nearestDepth = float.PositiveInfinity;
         var effectiveSwordLength = swordLengthMeters * 1.1f;
-        var currentTip = handPosition + handRotation * Vector3.forward * effectiveSwordLength;
-        var previousTip = hasPose
-            ? previousPosition + previousRotation * Vector3.forward * effectiveSwordLength
-            : currentTip;
 
         for (var index = 0; index < volleySpawner.ActiveProjectiles.Count; index++)
         {
@@ -126,13 +121,16 @@ private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quat
 
             var spellPosition = projectile.transform.position;
             var spellRadius = projectile.transform.lossyScale.x * 0.5f;
-            var distance = Mathf.Min(
-                DistanceToSegment(spellPosition, previousTip, currentTip),
-                DistanceToSegment(spellPosition, handPosition, currentTip));
-            if (hasPose)
-                distance = Mathf.Min(distance, DistanceToSegment(spellPosition, previousPosition, previousTip));
+            var hit = SpellOverlapsBlade(spellPosition, spellRadius, handPosition, handRotation, effectiveSwordLength);
+            if (!hit && hasPose)
+            {
+                var midPosition = Vector3.Lerp(previousPosition, handPosition, 0.5f);
+                var midRotation = Quaternion.Slerp(previousRotation, handRotation, 0.5f);
+                hit = SpellOverlapsBlade(spellPosition, spellRadius, previousPosition, previousRotation, effectiveSwordLength)
+                    || SpellOverlapsBlade(spellPosition, spellRadius, midPosition, midRotation, effectiveSwordLength);
+            }
 
-            if (distance <= swordCollisionRadiusMeters + spellRadius && projectile.DepthMeters < nearestDepth)
+            if (hit && projectile.DepthMeters < nearestDepth)
             {
                 best = projectile;
                 nearestDepth = projectile.DepthMeters;
@@ -140,6 +138,15 @@ private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quat
         }
 
         return best;
+    }
+
+    private static bool SpellOverlapsBlade(Vector3 spellPosition, float spellRadius, Vector3 handPosition, Quaternion handRotation, float length)
+    {
+        var localPosition = Quaternion.Inverse(handRotation) * (spellPosition - handPosition);
+        return Mathf.Abs(localPosition.x) <= DesktopPlayerControls.SwordHitHalfWidthMeters + spellRadius
+            && Mathf.Abs(localPosition.y) <= DesktopPlayerControls.SwordHitHalfThicknessMeters + spellRadius
+            && localPosition.z >= -spellRadius
+            && localPosition.z <= length + spellRadius;
     }
 
     private SpellProjectile FindShieldContact(Vector3 handPosition, Quaternion handRotation)
@@ -171,10 +178,6 @@ private void ProcessHand(XRNode handNode, ref Vector3 previousPosition, ref Quat
         return best;
     }
 
-#if UNITY_EDITOR
-
-#endif
-
 private void DebugCounter(SpellCounterAction action)
     {
         var desktopTools = FindAnyObjectByType<DesktopPlayerControls>();
@@ -185,16 +188,5 @@ private void DebugCounter(SpellCounterAction action)
             desktopTools.TriggerSlashAnimation();
         else
             desktopTools.TriggerBlockAnimation();
-    }
-
-    private static float DistanceToSegment(Vector3 point, Vector3 start, Vector3 end)
-    {
-        var segment = end - start;
-        var lengthSquared = segment.sqrMagnitude;
-        if (lengthSquared <= Mathf.Epsilon)
-            return Vector3.Distance(point, start);
-
-        var amount = Mathf.Clamp01(Vector3.Dot(point - start, segment) / lengthSquared);
-        return Vector3.Distance(point, start + segment * amount);
     }
 }

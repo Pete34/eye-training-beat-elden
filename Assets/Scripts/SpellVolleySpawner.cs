@@ -20,6 +20,8 @@ public sealed class SpellVolleySpawner : MonoBehaviour
     [SerializeField, Min(1)] private int maximumSpells = 2;
     [SerializeField, Min(0.01f)] private float minimumSpeedMetersPerSecond = 0.35f;
     [SerializeField, Min(0.01f)] private float maximumSpeedMetersPerSecond = 0.6f;
+    [SerializeField, Min(0f)] private float slotCatchUpMetersPerSecond = 0.35f;
+    [SerializeField, Min(0f)] private float spellHangSeconds = 0.6f;
     [SerializeField, Min(0.01f)] private float sharedWorldSizeAtReferenceDistance = 0.12f;
     [SerializeField, Min(0.01f)] private float referenceDistanceMeters = 1f;
     [SerializeField, Min(0f)] private float minimumSpellDistanceMeters = 1.5f;    [SerializeField, Min(0.5f)] private float desktopMinimumSpellDistanceMeters = 3.8f;
@@ -192,10 +194,13 @@ private void Update()
                 referenceDistanceMeters,
                 missBoundaryMeters,
                 glyph,
-                wrongActionHintDurationSeconds);
+                wrongActionHintDurationSeconds,
+                slotCatchUpMetersPerSecond,
+                spellHangSeconds);
 
             projectile.BuildAttackVisuals();
-            CreateGlyphMark(spellObject.transform, glyph);
+            var ball = spellObject.transform.Find("Spell Core");
+            CreateGlyphMark(ball != null ? ball : spellObject.transform, glyph);
             projectile.Missed += OnProjectileMissed;
             activeProjectiles.Add(projectile);
         }
@@ -257,50 +262,102 @@ private void OnProjectileMissed(SpellProjectile projectile)
         }
     }
 
-    private static void CreateGlyphMark(Transform parent, SpellGlyphType glyph)
+    private static void CreateGlyphMark(Transform ball, SpellGlyphType glyph)
     {
-        var spellRenderer = parent.GetComponent<Renderer>();
-        if (spellRenderer != null)
-            spellRenderer.material.color = glyph == SpellGlyphType.ShieldRune ? new Color(1f, 0.72f, 0.25f) : new Color(0.35f, 0.9f, 1f);
+        var ink = glyph == SpellGlyphType.ShieldRune
+            ? new Color(1f, 0.96f, 0.82f)
+            : new Color(0.94f, 0.98f, 1f);
 
         if (glyph == SpellGlyphType.SlashArc)
         {
-            CreateMarkPiece(parent, PrimitiveType.Cube, new Vector3(0f, 0f, -0.48f), new Vector3(0.42f, 0.09f, 0.05f), Quaternion.Euler(0f, 0f, -35f));
+            PaintStroke(ball, new Vector3(-0.2f, 0.3f, -0.36f), new Vector3(0.32f, -0.1f, -0.34f), ink, 0.09f);
             return;
         }
 
         if (glyph == SpellGlyphType.SlashCross)
         {
-            CreateMarkPiece(parent, PrimitiveType.Cube, new Vector3(0f, 0f, -0.48f), new Vector3(0.38f, 0.08f, 0.05f), Quaternion.Euler(0f, 0f, 45f));
-            CreateMarkPiece(parent, PrimitiveType.Cube, new Vector3(0f, 0f, -0.48f), new Vector3(0.38f, 0.08f, 0.05f), Quaternion.Euler(0f, 0f, -45f));
+            PaintStroke(ball, new Vector3(-0.28f, 0.26f, -0.34f), new Vector3(0.28f, -0.26f, -0.34f), ink, 0.075f);
+            PaintStroke(ball, new Vector3(0.28f, 0.26f, -0.34f), new Vector3(-0.28f, -0.26f, -0.34f), ink, 0.075f);
             return;
         }
 
-        CreateMarkPiece(parent, PrimitiveType.Cube, new Vector3(0f, 0f, -0.48f), new Vector3(0.32f, 0.08f, 0.06f), Quaternion.identity);
-        CreateMarkPiece(parent, PrimitiveType.Cube, new Vector3(0f, -0.16f, -0.48f), new Vector3(0.22f, 0.07f, 0.06f), Quaternion.identity);
+        PaintRing(ball, 0.5f, 0.075f, ink);
+        PaintStroke(ball, new Vector3(-0.16f, -0.24f, -0.4f), new Vector3(0.16f, -0.24f, -0.4f), ink, 0.07f);
     }
 
-    private static void CreateMarkPiece(Transform parent, PrimitiveType shape, Vector3 localPosition, Vector3 localScale, Quaternion localRotation)
+    private static void PaintStroke(Transform ball, Vector3 from, Vector3 to, Color ink, float width)
     {
-        var piece = GameObject.CreatePrimitive(shape);
-        piece.name = "GlyphMark";
-        piece.transform.SetParent(parent, false);
-        piece.transform.localPosition = localPosition;
-        piece.transform.localScale = localScale;
-        piece.transform.localRotation = localRotation;
-        var collider = piece.GetComponent<Collider>();
+        const int segments = 5;
+        var fromDirection = from.normalized;
+        var toDirection = to.normalized;
+        for (var index = 0; index < segments; index++)
+        {
+            var t = index / (segments - 1f);
+            var direction = Vector3.Slerp(fromDirection, toDirection, t);
+            var ahead = Vector3.Slerp(fromDirection, toDirection, Mathf.Min(1f, t + 0.12f));
+            var along = ahead - direction;
+            if (along.sqrMagnitude < 0.0001f)
+                along = toDirection - fromDirection;
+            PlaceInk(ball, direction, along, width, 0.18f, ink);
+        }
+    }
+
+    private static void PaintRing(Transform ball, float angularRadius, float width, Color ink)
+    {
+        const int segments = 10;
+        var center = Vector3.back;
+        var tangent = Vector3.Cross(center, Vector3.up).normalized;
+        var bitangent = Vector3.Cross(center, tangent).normalized;
+        for (var index = 0; index < segments; index++)
+        {
+            var angle = index / (float)segments * Mathf.PI * 2f;
+            var nextAngle = (index + 1) / (float)segments * Mathf.PI * 2f;
+            var direction = center + (tangent * Mathf.Cos(angle) + bitangent * Mathf.Sin(angle)) * angularRadius;
+            var ahead = center + (tangent * Mathf.Cos(nextAngle) + bitangent * Mathf.Sin(nextAngle)) * angularRadius;
+            PlaceInk(ball, direction, ahead - direction, width, 0.12f, ink);
+        }
+    }
+
+    private static void PlaceInk(Transform ball, Vector3 outward, Vector3 along, float width, float length, Color ink)
+    {
+        var normal = outward.normalized;
+        var stroke = Vector3.ProjectOnPlane(along, normal);
+        if (stroke.sqrMagnitude < 0.0001f)
+            stroke = Vector3.Cross(normal, Vector3.up);
+        stroke.Normalize();
+
+        const float thickness = 0.02f;
+        var mark = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        mark.name = "GlyphMark";
+        mark.transform.SetParent(ball, false);
+        mark.transform.localRotation = Quaternion.LookRotation(normal, stroke);
+        mark.transform.localPosition = normal * (0.5f + thickness * 0.35f);
+        mark.transform.localScale = new Vector3(width, length, thickness);
+
+        var collider = mark.GetComponent<Collider>();
         if (collider != null)
             Destroy(collider);
 
-        var renderer = piece.GetComponent<Renderer>();
-        if (renderer != null)
+        var renderer = mark.GetComponent<Renderer>();
+        if (renderer == null)
+            return;
+
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        var shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null)
+            shader = Shader.Find("Unlit/Color");
+        if (shader == null)
+            return;
+
+        var material = new Material(shader) { color = ink };
+        if (material.HasProperty("_BaseColor"))
+            material.SetColor("_BaseColor", ink);
+        if (material.HasProperty("_EmissionColor"))
         {
-            renderer.material.color = new Color(0.92f, 0.98f, 1f);
-            if (renderer.material.HasProperty("_EmissionColor"))
-            {
-                renderer.material.EnableKeyword("_EMISSION");
-                renderer.material.SetColor("_EmissionColor", new Color(0.6f, 0.9f, 1f));
-            }
+            material.EnableKeyword("_EMISSION");
+            material.SetColor("_EmissionColor", ink * 1.4f);
         }
+
+        renderer.sharedMaterial = material;
     }
 }

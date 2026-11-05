@@ -2165,11 +2165,10 @@ MonoBehaviour:
   counterJudge: {fileID: 0}
   slashSpeedThreshold: 1.2
   swordLengthMeters: 0.8
-  swordCollisionRadiusMeters: 0.3
-  shieldProjectionMeters: 0.45
-  shieldWidthMeters: 0.35
+  shieldProjectionMeters: 0.16
+  shieldWidthMeters: 0.4
   shieldHeightMeters: 0.4
-  shieldPaddingMeters: 0.08
+  shieldPaddingMeters: 0
   enableEditorKeyboardTesting: 1
 --- !u!114 &1867595480
 MonoBehaviour:
@@ -2206,6 +2205,8 @@ MonoBehaviour:
   maximumSpells: 2
   minimumSpeedMetersPerSecond: 0.35
   maximumSpeedMetersPerSecond: 0.6
+  slotCatchUpMetersPerSecond: 0.35
+  spellHangSeconds: 0.6
   sharedWorldSizeAtReferenceDistance: 0.12
   referenceDistanceMeters: 1
   minimumSpellDistanceMeters: 1.5
@@ -2217,6 +2218,9 @@ MonoBehaviour:
   spawnOnStart: 1
   autoRepeatVolleys: 0
   delayBetweenVolleys: 1
+  glyphSpawnMode: 0
+  forgivingTrainingNpc: 0
+  wrongActionHintDurationSeconds: 6
   retaliationSpeedMetersPerSecond: 7
 --- !u!4 &1867595482
 Transform:
@@ -2271,7 +2275,12 @@ MonoBehaviour:
   sprintMultiplier: 1.8
   arenaMovementRadiusMeters: 6
   showDesktopTools: 1
-  swordSweepRadiusMeters: 0.35
+  shieldHitboxForwardMeters: 0.16
+  shieldHitboxHalfWidthMeters: 0.2
+  shieldHitboxHalfHeightMeters: 0.2
+  shieldHitboxPaddingMeters: 0
+  earlyBlockDepthMeters: 0.9
+  lateBlockDepthMeters: 0.38
 --- !u!114 &1867595485
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2287,6 +2296,10 @@ MonoBehaviour:
   volleySpawner: {fileID: 0}
   counterJudge: {fileID: 0}
   bossAnchor: {fileID: 0}
+  enableTwoPhaseTraining: 1
+  phaseAnnouncementSeconds: 4.5
+  phaseTwoBossPrefab: {fileID: 0}
+  phaseTwoSpawnPoint: {fileID: 0}
   cleanVolleysRequired: 3
   windowSeconds: 8
   bossHitRadiusMeters: 0.6
